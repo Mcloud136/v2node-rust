@@ -1,0 +1,15 @@
+# 阈值只在对应 lint 启用时生效；这些 lint 属于 pedantic，
+# 通过 `make lint-strict` 与 CI 的非阻断报告作业观测。
+# 目标：先可见，再逐条收敛，避免一次性把 300+ 条风格问题堆到发布门禁上。
+
+# 认知复杂度上限（默认 25）。协议解析分支多，收紧到 20 促使拆分。
+cognitive-complexity-threshold = 20
+
+# 单函数行数上限（默认 100）。listener / vless 存在长函数，放宽到 120 作为过渡。
+too-many-lines-threshold = 120
+
+# 参数个数上限（默认 7）。转发与启动函数参数天然偏多，设为 8。
+too-many-arguments-threshold = 8
+
+# 类型复杂度上限（默认 250）。
+type-complexity-threshold = 300

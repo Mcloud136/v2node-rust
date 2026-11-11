@@ -1,0 +1,81 @@
+name: Rust
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # 硬门禁：三项全绿才允许合并。任何一项失败都会让本 job 变红。
+  # C0b 起仓库为 workspace，命令加 --workspace / --all 覆盖 v2node-proto。
+  quality:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      - name: Clippy (deny warnings)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Build
+        run: cargo build --workspace --verbose
+
+      - name: Test
+        run: cargo test --workspace --verbose
+
+  # 观测作业：pedantic / nursery 全量报告，用于逐步收敛，不阻断合并。
+  # 基线记录见 docs/m1-completion-plan.md 的 Q-1。
+  strict-report:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Pedantic and nursery report (non-blocking)
+        run: cargo clippy --workspace --all-targets -- -W clippy::pedantic -W clippy::nursery
+
+  # 非阻断：正式基准的编译与观测。完整基准在开发机跑并归档到
+  # docs/benchmark-results/；CI 只保证 bench target 可编译、不做硬阈值判定。
+  # 口径见 docs/benchmark-spec.md。
+  bench-observe:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Compile benchmarks
+        run: cargo bench --bench proto_bench --no-run
+
+      - name: Benchmark observation (non-blocking)
+        run: cargo bench --bench proto_bench

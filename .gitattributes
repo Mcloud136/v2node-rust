@@ -1,0 +1,15 @@
+* text=auto eol=lf
+*.sh text eol=lf
+*.py text eol=lf
+*.rs text eol=lf
+*.toml text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+Cargo.lock text eol=lf
+
+# 二进制制品不做换行转换
+*.bin binary
+*.gz binary
+*.png binary

@@ -1,0 +1,13 @@
+# 仅使用 stable 支持的选项。
+# imports_granularity / group_imports / wrap_comments 等属于 nightly-only，
+# 一旦启用，stable 工具链会打印 "unstable features" 警告并静默忽略，
+# 造成本地与 CI 的格式认知不一致，因此这里不启用。
+edition = "2024"
+max_width = 100
+hard_tabs = false
+tab_spaces = 4
+# 强制 LF：Windows 上默认的 "Auto" 会把文件写成 CRLF，导致跨平台 diff 全量抖动。
+newline_style = "Unix"
+use_small_heuristics = "Default"
+reorder_imports = true
+reorder_modules = true

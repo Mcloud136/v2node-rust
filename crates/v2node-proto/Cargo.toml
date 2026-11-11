@@ -1,0 +1,24 @@
+[package]
+name = "v2node-proto"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+description = "VLESS wire protocol primitives shared by the node and the future client"
+
+[dependencies]
+aes = "0.9.4"
+aes-gcm = "0.11.1"
+anyhow = "1.0.104"
+base64 = "0.23.1"
+chacha20poly1305 = "0.11.0"
+ctr = "0.10.1"
+ml-kem = { version = "0.3.4", features = ["getrandom"] }
+rand = "0.10.3"
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "net", "time", "sync", "signal", "io-util", "fs"] }
+x25519-dalek = { version = "3.0.0", features = ["static_secrets", "getrandom"] }
+
+[dev-dependencies]
+blake3 = "1.8"
+
+[lints]
+workspace = true

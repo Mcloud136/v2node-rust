@@ -1,0 +1,83 @@
+[workspace]
+members = [".", "crates/v2node-proto"]
+
+[workspace.lints.rust]
+# 当前代码不含 unsafe；锁死防止回流（如有必要引入，需在评审中单独说明不变量）。
+unsafe_code = "deny"
+# 默认只是 warn，这里升为 deny，避免忽略 Result/Option 的返回值。
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+# clippy::all 默认即 warn，CI 用 `-D warnings` 升级为 error，无需重复声明。
+# 这里只额外锁定与线上事故直接相关的几条（restriction 组默认不启用）。
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+mem_forget = "deny"
+# 已收敛的第一批 pedantic 规则（78 处，2026-11-11）：`_ = future` -> `() = future`。
+ignored_unit_patterns = "deny"
+# 第二批（9 处，2026-11-11）：match 提取 + 提前返回 -> let-else。
+manual_let_else = "deny"
+# 注：pedantic / nursery 其余规则尚未全局启用。严格模式基线 215 条（含新 crate），
+# 主要集中于 cast_possible_truncation / unreadable_literal /
+# missing_const_for_fn / cast_possible_wrap，收敛路径见
+# docs/m1-completion-plan.md 的 Q-1，观测入口为 `make lint-strict`。
+
+[package]
+name = "v2node-rust"
+version = "0.2.0"
+edition = "2024"
+rust-version = "1.99"
+
+[lints]
+workspace = true
+
+[dependencies]
+aes = "0.9.4"
+aes-gcm = "0.11.1"
+anyhow = "1.0.104"
+arc-swap = "1.9.5"
+base64 = "0.23.1"
+blake3 = "1.8"
+chacha20poly1305 = "0.11.0"
+bytes = "1.12.1"
+ctr = "0.10.1"
+clap = { version = "4.6.7", features = ["derive"] }
+dashmap = "6.2.1"
+futures = "0.3.34"
+hex = "0.4.3"
+instant-acme = "0.8.5"
+ml-kem = { version = "0.3.4", features = ["getrandom"] }
+parking_lot = "0.13.0"
+rand = "0.10.3"
+rcgen = "0.14.10"
+reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls", "gzip", "query"] }
+rmp-serde = "1.3.1"
+rustls = { version = "0.23.46", default-features = false, features = ["std", "tls12", "aws_lc_rs", "logging"] }
+rustls-pemfile = "2.2.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sha2 = "0.11.1"
+thiserror = "2.0.21"
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "net", "time", "sync", "signal", "io-util", "fs"] }
+tokio-rustls = { version = "0.26.6", default-features = false, features = ["tls12", "aws_lc_rs", "logging"] }
+tokio-tungstenite = { version = "0.30.0", features = ["rustls-tls-native-roots"] }
+tokio-util = { version = "0.7.20", features = ["rt"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "registry", "fmt", "ansi"] }
+uuid = { version = "1.29.2", features = ["serde", "v4"] }
+x25519-dalek = { version = "3.0.0", features = ["static_secrets", "getrandom"] }
+x509-parser = "0.18.1"
+v2node-proto = { path = "crates/v2node-proto" }
+
+[dev-dependencies]
+criterion = "0.8.2"
+
+[[bench]]
+name = "proto_bench"
+harness = false
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
