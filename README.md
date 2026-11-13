@@ -125,6 +125,7 @@ v2node-rust uninstall
 | `Runtime.PanelRetryBackoffMs` | 200 | 面板请求重试间隔 |
 | `Runtime.PushIdempotency` | false | 流量推送批次幂等；需面板支持 `X-V2Node-Batch-Id` 去重 |
 | `Runtime.TrafficSpoolPath` | 空 | 流量上报 spool 路径；设置后未送达批次会落盘并在重启后重放，建议 `/var/lib/v2node-rust/traffic.spool` |
+| `Runtime.RelayBufferSize` | 32768 | 数据面 relay 与 WS 桥接缓冲。注意：VLESS Encryption 记录层 pump 使用独立的 16384 字节缓冲，不受此字段影响 |
 | `Acme.DirectoryUrl` | LE staging | 生产必须显式改为 `https://acme-v02.api.letsencrypt.org/directory` |
 | `Acme.Http01Bind` | `0.0.0.0:80` | HTTP-01 挑战端口，需公网可达 |
 | `Acme.DnsEnv` | 空 | Cloudflare 凭据，形如 `{"CLOUDFLARE_DNS_API_TOKEN":"..."}`；面板下发的 `tls_settings.dns_env` 使用 `KEY=VALUE,KEY=VALUE`，会覆盖同名全局值 |
@@ -168,7 +169,7 @@ cargo test
 配置来源：`rustfmt.toml`（强制 LF，避免 Windows 写回 CRLF）、`clippy.toml`（复杂度/行数/参数阈值）、`Cargo.toml` 的 `[lints]`（`unsafe_code`、`unused_must_use`、`dbg_macro`、`todo`、`unimplemented`、`mem_forget` 为 deny）。
 `GitHub Actions` 的 `.github/workflows/rust.yml` 跑同一套硬门禁，另有 `strict-report` 作业输出严格模式报告但不阻断。
 
-当前严格模式基线为 **248 条**（2026-11-11）。已收敛并锁定为 `deny` 的两批：`ignored_unit_patterns`（78 处）、`manual_let_else`（9 处）；剩余集中在 `cast_possible_truncation`(49)、`unreadable_literal`(34)、`missing_const_for_fn`(24)、`cast_possible_wrap`(16)。收敛计划见 [M1 收尾计划](docs/m1-completion-plan.md) 的 Q-1。
+严格模式基线随工具链版本变化，**引用时必须带工具链版本**：clippy 0.1.99（Windows 本机）140 条、clippy 1.100（Linux CI）147 条（2026-11-14 实测；本机当日早先为 143，补文档后降 3）。已收敛并锁定为 `deny` 的两批：`ignored_unit_patterns`（78 处）、`manual_let_else`（9 处）；剩余集中在 `cast_possible_truncation`、`cast_precision_loss`、`cast_possible_wrap`、`missing_const_for_fn`、`unreadable_literal`。收敛计划见 [完善推进计划](docs/improvement-plan.md) 的 B5c。
 
 实机 E2E 在 Linux 构建机运行，需要 `vless_probe` 与 Python mock 面板：
 
@@ -197,11 +198,13 @@ bash tests/e2e_acme_real.sh
 
 ## 文档
 
+- [完善推进计划](docs/improvement-plan.md)（当前进度载体）
 - [Rust 版与 Go 版性能对比](docs/performance-comparison.md)
 - [VLESS Encryption 生产配置](docs/vless-encryption-prod.md)
-- [M1 阶段完成情况与推进计划](docs/m1-completion-plan.md)
-- [自研客户端设计规划](docs/client-design-plan.md)
-- [自研客户端：思考过程与交接说明](docs/client-handoff-thinking.md)
+- [M1 阶段完成情况（历史归档）](docs/m1-completion-plan.md)
+- [跨语言性能基准规范](docs/benchmark-spec.md)
+
+自研客户端已独立为单独仓库（McloudClient），其设计与交接文档随客户端仓库维护，不在本仓库。
 
 ## 说明
 
