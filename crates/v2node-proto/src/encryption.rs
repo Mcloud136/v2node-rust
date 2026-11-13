@@ -195,15 +195,30 @@ enum CipherKind {
 
 struct AeadState {
     kind: CipherKind,
-    key: [u8; 32],
+    cipher: AeadCipher,
     nonce: [u8; 12],
+}
+
+enum AeadCipher {
+    Aes(Box<Aes256Gcm>),
+    ChaCha(ChaCha20Poly1305),
 }
 
 impl AeadState {
     fn new(context: &[u8], key_material: &[u8], kind: CipherKind) -> Result<Self> {
+        let key = derive_key_raw(context, key_material)?;
+        let cipher = match kind {
+            CipherKind::Aes => AeadCipher::Aes(Box::new(
+                Aes256Gcm::new_from_slice(&key).map_err(|error| anyhow!("AES init: {error}"))?,
+            )),
+            CipherKind::ChaCha => AeadCipher::ChaCha(
+                ChaCha20Poly1305::new_from_slice(&key)
+                    .map_err(|error| anyhow!("ChaCha init: {error}"))?,
+            ),
+        };
         Ok(Self {
             kind,
-            key: derive_key_raw(context, key_material)?,
+            cipher,
             nonce: [0u8; 12],
         })
     }
@@ -233,68 +248,32 @@ impl AeadState {
     }
 
     fn seal_with_nonce(&self, nonce: [u8; 12], plaintext: &[u8], aad: &[u8]) -> Result<Vec<u8>> {
-        match self.kind {
-            CipherKind::Aes => {
-                let cipher = Aes256Gcm::new_from_slice(&self.key)
-                    .map_err(|error| anyhow!("AES init: {error}"))?;
-                let nonce = AesNonce::from(nonce);
-                cipher
-                    .encrypt(
-                        &nonce,
-                        Payload {
-                            msg: plaintext,
-                            aad,
-                        },
-                    )
-                    .map_err(|error| anyhow!("AES seal: {error}"))
-            }
-            CipherKind::ChaCha => {
-                let cipher = ChaCha20Poly1305::new_from_slice(&self.key)
-                    .map_err(|error| anyhow!("ChaCha init: {error}"))?;
-                let nonce = ChaChaNonce::from(nonce);
-                cipher
-                    .encrypt(
-                        &nonce,
-                        Payload {
-                            msg: plaintext,
-                            aad,
-                        },
-                    )
-                    .map_err(|error| anyhow!("ChaCha seal: {error}"))
-            }
+        let payload = Payload {
+            msg: plaintext,
+            aad,
+        };
+        match &self.cipher {
+            AeadCipher::Aes(cipher) => cipher
+                .encrypt(&AesNonce::from(nonce), payload)
+                .map_err(|error| anyhow!("AES seal: {error}")),
+            AeadCipher::ChaCha(cipher) => cipher
+                .encrypt(&ChaChaNonce::from(nonce), payload)
+                .map_err(|error| anyhow!("ChaCha seal: {error}")),
         }
     }
 
     fn open_with_nonce(&self, nonce: [u8; 12], ciphertext: &[u8], aad: &[u8]) -> Result<Vec<u8>> {
-        match self.kind {
-            CipherKind::Aes => {
-                let cipher = Aes256Gcm::new_from_slice(&self.key)
-                    .map_err(|error| anyhow!("AES init: {error}"))?;
-                let nonce = AesNonce::from(nonce);
-                cipher
-                    .decrypt(
-                        &nonce,
-                        Payload {
-                            msg: ciphertext,
-                            aad,
-                        },
-                    )
-                    .map_err(|error| anyhow!("AES open: {error}"))
-            }
-            CipherKind::ChaCha => {
-                let cipher = ChaCha20Poly1305::new_from_slice(&self.key)
-                    .map_err(|error| anyhow!("ChaCha init: {error}"))?;
-                let nonce = ChaChaNonce::from(nonce);
-                cipher
-                    .decrypt(
-                        &nonce,
-                        Payload {
-                            msg: ciphertext,
-                            aad,
-                        },
-                    )
-                    .map_err(|error| anyhow!("ChaCha open: {error}"))
-            }
+        let payload = Payload {
+            msg: ciphertext,
+            aad,
+        };
+        match &self.cipher {
+            AeadCipher::Aes(cipher) => cipher
+                .decrypt(&AesNonce::from(nonce), payload)
+                .map_err(|error| anyhow!("AES open: {error}")),
+            AeadCipher::ChaCha(cipher) => cipher
+                .decrypt(&ChaChaNonce::from(nonce), payload)
+                .map_err(|error| anyhow!("ChaCha open: {error}")),
         }
     }
 }
@@ -810,6 +789,7 @@ where
             let mut net_buffer = Vec::with_capacity(capacity);
             let mut net_tmp = vec![0u8; capacity.max(1024)];
             let mut header_plain: Option<[u8; 5]> = None;
+            let mut cursor = 0usize;
             'outer: loop {
                 let read = match net_reader.read(&mut net_tmp).await {
                     Ok(0) | Err(_) => break,
@@ -818,11 +798,11 @@ where
                 net_buffer.extend_from_slice(&net_tmp[..read]);
                 loop {
                     if header_plain.is_none() {
-                        if net_buffer.len() < 5 {
+                        if net_buffer.len() - cursor < 5 {
                             break;
                         }
                         let mut header = [0u8; 5];
-                        header.copy_from_slice(&net_buffer[..5]);
+                        header.copy_from_slice(&net_buffer[cursor..cursor + 5]);
                         if let Some(xor) = read_header_xor.as_mut() {
                             xor.apply(&mut header);
                         }
@@ -837,18 +817,24 @@ where
                     {
                         break 'outer;
                     }
-                    if net_buffer.len() < 5 + length {
+                    let end = cursor + 5 + length;
+                    if net_buffer.len() < end {
                         break;
                     }
-                    let ciphertext = net_buffer[5..5 + length].to_vec();
-                    net_buffer.drain(..5 + length);
+                    let ciphertext = &net_buffer[cursor + 5..end];
                     header_plain = None;
-                    let Ok(plaintext) = read_aead.open(&ciphertext, &header) else {
+                    let Ok(plaintext) = read_aead.open(ciphertext, &header) else {
                         break 'outer;
                     };
                     if app_writer.write_all(&plaintext).await.is_err() {
                         break 'outer;
                     }
+                    cursor = end;
+                }
+                if cursor > 0 {
+                    net_buffer.copy_within(cursor.., 0);
+                    net_buffer.truncate(net_buffer.len() - cursor);
+                    cursor = 0;
                 }
             }
             let _ = app_writer.shutdown().await;
