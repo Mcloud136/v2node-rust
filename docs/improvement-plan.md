@@ -1,9 +1,9 @@
 # v2node-rust 完善推进计划
 
-> 编制日期：2026-11-14 ｜ 最近修订：2026-11-14（按审查报告重构为状态单表）
-> 事实基线：本地 `main` @ `f83c511`（**ahead origin/main 2**）；`origin/main` @ `ea2875e`；生产四节点运行 `v0.2.0`
+> 编制日期：2026-11-14 ｜ 最近修订：2026-11-14（增量补齐：R11、基准豁免条款、归档命名）
+> 事实基线：本地 `main` @ `a742bdf`（**ahead origin/main 3**）；`origin/main` @ `ea2875e`；生产四节点运行 `v0.2.0`
 > 适用范围：本仓库（节点端 + `v2node-proto`），不含面板与独立客户端仓库
-> 进度载体：本文件为唯一进度载体。原 `TODO.md` 已移至 `.workbuddy/TODO.md`（不入库）；[m1-completion-plan.md](m1-completion-plan.md) 为历史归档
+> 进度载体：本文件为唯一进度载体。原 `TODO.md` 已归档为 `.workbuddy/TODO.archived.md`（不入库，首行含归档说明）；[m1-completion-plan.md](m1-completion-plan.md) 为历史归档
 > 规范依据：`rust-best-practices` 红线 + [benchmark-spec.md](benchmark-spec.md) v1.0
 
 ---
@@ -96,6 +96,8 @@ cargo clippy --workspace --all-targets --message-format=short \
 
 无文档 pub 项计数须**跳过属性行**（`#[allow(...)]` 等）再找 `///`，否则会把"文档在属性上方"的项误判为缺失（proto 的 `EncryptionServer`/`ClientEncryptionConfig` 曾因此被误报）。
 
+**审查报告引用**：本文件的状态单表重构与计数纪律源自外部审查报告 `improvement-plan-review-2026-11-14.md`（留在工作区 `C:\Users\Administrator\WorkBuddy\2026-11-14-02-20-58\`，不入库）。该报告复核了 panic/let_/测试数等断言并指出双时间点冲突；其严格模式计数 142 含锁噪声，本文件以 clean 构建 short 口径 127 为准。
+
 ---
 
 ## 2. 目标与关闭标准
@@ -156,6 +158,8 @@ cargo clippy --workspace --all-targets --message-format=short \
 
 **目标以生产区 90 为准**（§1.4）。测试区 20 处不纳入，可在 `tests` 模块加 `#[allow(clippy::pedantic)]` 并注明理由。每批开工前按 §1.4 口径重新计数，避免按全量数字虚估工作量。基线随工具链变化（0.1.99 与 1.100 规则集不同），**引用时必须带工具链版本**。
 
+**验收口径（不做绝对数字门控）**：每批改动后生产区计数**只减不增**即通过；某规则归零后立即升 `deny` 锁定，防止回流。不预设"必须降到 N 条"的硬阈值——基线随工具链漂移，绝对数字门控会误伤。
+
 ### B6 其余三台 journald + Apport
 
 srv85 已完成（journald 200M/50M、Apport enabled=0）。其余三台需统一运维窗口，验收 `journalctl --disk-usage` < 200M。
@@ -184,7 +188,7 @@ srv85 已完成（journald 200M/50M、Apport enabled=0）。其余三台需统�
 
 ### 原 TODO.md 遗留项处置
 
-`TODO.md` 已移至 `.workbuddy/TODO.md`（不入库）。条目处置：
+`TODO.md` 已归档为 `.workbuddy/TODO.archived.md`（不入库，首行含归档说明，保留备查不删）。条目处置：
 
 | 原条目 | 处置 |
 |---|---|
@@ -219,7 +223,7 @@ srv85 已完成（journald 200M/50M、Apport enabled=0）。其余三台需统�
 | 标签 | 本地 v0.2.1 已删（原 `c40ba76`→`ea2875e`，可重建）；远端仅 v0.2.0 |
 | CI | quality / strict-report / bench-observe 三作业全 success |
 
-**当前偏离**：第二轮产生 2 个新提交 `9f79d34`（代码红线修复）、`f83c511`（文档同步），**本地 ahead origin/main 2，尚未推送**（推送需用户授权）。
+**当前偏离**：第二轮起产生 3 个新提交 `9f79d34`（代码红线修复）、`f83c511`（文档同步）、`a742bdf`（按审查报告重构为状态单表），**本地 ahead origin/main 3，尚未推送**（推送需用户授权，见 R11）。
 
 ### 4.2 第二轮：自主推进（2026-11-14，已实施）
 
@@ -265,13 +269,14 @@ L1 基准证据：[2026-11-14-b3-redline-fix.md](benchmark-results/2026-11-14-b3
 | R1 | 外部输入延迟 | — | — | 已消解：ACME 延后，不阻塞关闭 |
 | R2 | 无隔离测试环境，E2E 需借生产机 | 高 | 高 | srv85 隔离实例（独立端口/目录/spool，不碰生产配置与 systemd）；留 kill 与回滚 |
 | R3 | 性能改动未经 Linux E2E | 中 | 高 | 远端 CI 已验证；部署前必须跑 8 e2e + 1 interop |
-| R4 | 记录层修复引入 P99 回退 | 中 | 中 | 附 L1 before/after，交替 A/B 判定，P99 >5% 不合并 |
+| R4 | 记录层修复引入 P99 回退 | 中 | 中 | 附 L1 before/after，交替 A/B 判定，P99 >5% 不合并。**L1 仅覆盖 Windows 本机**，Linux 侧待构建机复测；路径未改动的 workload 按 benchmark-spec §5.7 豁免 |
 | R5 | C1 热更新竞态 | 中 | 高 | 保持"先停任务后换 listener"不变量；三子任务独立验收；保留回滚 |
 | R6 | Log.Level=error 吞证书告警 | — | — | 已消解：ACME 延后；重启 A1 时再调 warn |
 | R7 | 面板幂等补丁被 update.sh 覆盖 | 中 | 中 | 现网 PushIdempotency=true，补丁失效退化为无去重；D3 入库前面板升级后复核 |
 | R8 | node3 Debian 10 EOL | 高 | 中 | 显式接受风险，30 天复查（2026-12-14） |
 | R9 | 文档与实际漂移 | 中 | 中 | 本文件§1 单表为唯一事实来源；发版同步 CHANGELOG 与基线 |
 | R10 | 老客户端持续握手失败 | 高 | 低 | 已决策接受：兼容由自研客户端承接，失败属预期 |
+| R11 | 本地 3 提交未推送，远端 CI 未验证第二轮改动 | 中 | 中 | `9f79d34`/`f83c511`/`a742bdf` 仅在本地；推送需用户授权，推送后远端 CI 自动验证。未推送前不得宣称第二轮改动"已上线/已验证" |
 
 ---
 
