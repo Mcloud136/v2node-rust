@@ -2775,6 +2775,7 @@ dependencies = [
  "anyhow",
  "base64 0.23.1",
  "blake3",
+ "bytes",
  "chacha20poly1305",
  "ctr",
  "ml-kem",
