@@ -19,10 +19,11 @@ ignored_unit_patterns = "deny"
 # 第二批（9 处，2026-11-11）：match 提取 + 提前返回 -> let-else。
 manual_let_else = "deny"
 # 注：pedantic / nursery 其余规则尚未全局启用。严格模式基线随工具链变化：
-# clippy 0.1.99 本机 140 / clippy 1.100 CI 147（2026-11-14），主要集中于
+# clippy 0.1.99 本机干净口径 127（生产区 90，2026-11-14），主要集中于
 # cast_possible_truncation / cast_precision_loss / cast_possible_wrap /
-# missing_const_for_fn / unreadable_literal，收敛路径见
-# docs/improvement-plan.md 的 B5c，观测入口为 `make lint-strict`。
+# missing_const_for_fn / unreadable_literal。计数须排除 generated 汇总行与
+# 锁文件噪声（见 docs/improvement-plan.md §1.4），收敛路径见该文件 B5c，
+# 观测入口为 `make lint-strict`。
 
 [package]
 name = "v2node-rust"

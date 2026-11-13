@@ -169,7 +169,7 @@ cargo test
 配置来源：`rustfmt.toml`（强制 LF，避免 Windows 写回 CRLF）、`clippy.toml`（复杂度/行数/参数阈值）、`Cargo.toml` 的 `[lints]`（`unsafe_code`、`unused_must_use`、`dbg_macro`、`todo`、`unimplemented`、`mem_forget` 为 deny）。
 `GitHub Actions` 的 `.github/workflows/rust.yml` 跑同一套硬门禁，另有 `strict-report` 作业输出严格模式报告但不阻断。
 
-严格模式基线随工具链版本变化，**引用时必须带工具链版本**：clippy 0.1.99（Windows 本机）140 条、clippy 1.100（Linux CI）147 条（2026-11-14 实测；本机当日早先为 143，补文档后降 3）。已收敛并锁定为 `deny` 的两批：`ignored_unit_patterns`（78 处）、`manual_let_else`（9 处）；剩余集中在 `cast_possible_truncation`、`cast_precision_loss`、`cast_possible_wrap`、`missing_const_for_fn`、`unreadable_literal`。收敛计划见 [完善推进计划](docs/improvement-plan.md) 的 B5c。
+严格模式基线随工具链版本变化，**引用时必须带工具链版本与计数口径**：clippy 0.1.99（Windows 本机）**127 条**（生产区 90 / 测试区 20 / benches+examples+tests 17，2026-11-14 干净口径）。计数须排除 `generated` 汇总行与增量编译锁文件噪声，方法见 [完善推进计划](docs/improvement-plan.md) §1.4。已收敛并锁定为 `deny` 的两批：`ignored_unit_patterns`（78 处）、`manual_let_else`（9 处）；剩余集中在 `cast_possible_truncation`、`cast_precision_loss`、`cast_possible_wrap`、`missing_const_for_fn`、`unreadable_literal`。收敛目标只针对生产区，计划见 [完善推进计划](docs/improvement-plan.md) 的 B5c。
 
 实机 E2E 在 Linux 构建机运行，需要 `vless_probe` 与 Python mock 面板：
 
