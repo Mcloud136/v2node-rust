@@ -187,7 +187,7 @@ pub fn derive_key_raw(context: &[u8], key_material: &[u8]) -> Result<[u8; 32]> {
     hash_with_key(&key_words, DERIVE_KEY_MATERIAL, key_material)
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CipherKind {
     Aes,
     ChaCha,
@@ -1182,5 +1182,71 @@ mod tests {
         assert_eq!(&buffer, b"world");
         client_pump.abort();
         server_pump.abort();
+    }
+
+    /// 跨实现 KAT：旧版（每次 new_from_slice）与新版（复用 cipher）逐字节互通。
+    /// 模拟 v0.2.0 服务端 seal → v0.2.1 客户端 open，反之亦然。
+    #[test]
+    fn cross_version_aead_interop() {
+        let key = derive_key_raw(b"ctx", b"key").unwrap();
+        let plaintext = "cross-version known-answer test payload 1234567890";
+        let aad = b"header";
+
+        for kind in [CipherKind::Aes, CipherKind::ChaCha] {
+            // 旧版路径：每次新建 cipher（v0.2.0 行为）。
+            let old_seal = |nonce: [u8; 12], pt: &[u8], aad: &[u8]| -> Vec<u8> {
+                match kind {
+                    CipherKind::Aes => {
+                        let c = Aes256Gcm::new_from_slice(&key).unwrap();
+                        c.encrypt(&AesNonce::from(nonce), Payload { msg: pt, aad })
+                            .unwrap()
+                    }
+                    CipherKind::ChaCha => {
+                        let c = ChaCha20Poly1305::new_from_slice(&key).unwrap();
+                        c.encrypt(&ChaChaNonce::from(nonce), Payload { msg: pt, aad })
+                            .unwrap()
+                    }
+                }
+            };
+            let old_open = |nonce: [u8; 12], ct: &[u8], aad: &[u8]| -> Vec<u8> {
+                match kind {
+                    CipherKind::Aes => {
+                        let c = Aes256Gcm::new_from_slice(&key).unwrap();
+                        c.decrypt(&AesNonce::from(nonce), Payload { msg: ct, aad })
+                            .unwrap()
+                    }
+                    CipherKind::ChaCha => {
+                        let c = ChaCha20Poly1305::new_from_slice(&key).unwrap();
+                        c.decrypt(&ChaChaNonce::from(nonce), Payload { msg: ct, aad })
+                            .unwrap()
+                    }
+                }
+            };
+
+            // 新版路径：读写各一个 AeadState（与实际协议一致）。
+            let mut new_opener = AeadState::new(b"ctx", b"key", kind).unwrap();
+            let mut new_sealer = AeadState::new(b"ctx", b"key", kind).unwrap();
+
+            // 多帧递增 nonce，验证 nonce 序列一致。
+            for frame in 0..5u8 {
+                let pt = format!("{plaintext} frame={frame}");
+                let nonce_val = frame + 1;
+                // 旧 seal → 新 open
+                let mut old_nonce = [0u8; 12];
+                old_nonce[11] = nonce_val;
+                let ct = old_seal(old_nonce, pt.as_bytes(), aad);
+                let opened = new_opener.open(&ct, aad).unwrap();
+                assert_eq!(opened, pt.as_bytes(), "old→new frame {frame} kind {kind:?}");
+
+                // 新 seal → 旧 open（sealer 独立递增，nonce 与 opener 同步）
+                let ct2 = new_sealer.seal(pt.as_bytes(), aad).unwrap();
+                let opened2 = old_open(old_nonce, &ct2, aad);
+                assert_eq!(
+                    opened2,
+                    pt.as_bytes(),
+                    "new→old frame {frame} kind {kind:?}"
+                );
+            }
+        }
     }
 }
