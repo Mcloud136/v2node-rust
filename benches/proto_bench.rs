@@ -180,6 +180,36 @@ fn bench_l1(c: &mut Criterion) {
             )
         })
     });
+    // AES-NI 对照组（ring，与生产 AeadState 同路径）。
+    let ni_key = ring::aead::LessSafeKey::new(
+        ring::aead::UnboundKey::new(&ring::aead::AES_256_GCM, &f.key).expect("NI key"),
+    );
+    c.bench_function("W4-NI AES-256-GCM seal 8192B (ring)", |b| {
+        b.iter(|| {
+            let mut buf = f.plaintext.clone();
+            ni_key
+                .seal_in_place_append_tag(
+                    ring::aead::Nonce::assume_unique_for_key(f.nonce_bytes),
+                    ring::aead::Aad::empty(),
+                    &mut buf,
+                )
+                .expect("NI seal");
+            black_box(buf)
+        })
+    });
+    c.bench_function("W5-NI AES-256-GCM open 8192B (ring)", |b| {
+        b.iter(|| {
+            let mut buf = f.ciphertext.clone();
+            let plain = ni_key
+                .open_in_place(
+                    ring::aead::Nonce::assume_unique_for_key(f.nonce_bytes),
+                    ring::aead::Aad::empty(),
+                    &mut buf,
+                )
+                .expect("NI open");
+            black_box(plain.len())
+        })
+    });
     c.bench_function("W6 pump-style alloc+copy 8192B", |b| {
         b.iter(|| {
             let mut out = Vec::with_capacity(RECORD);

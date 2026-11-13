@@ -14,6 +14,7 @@ chacha20poly1305 = "0.11.0"
 ctr = "0.10.1"
 ml-kem = { version = "0.3.4", features = ["getrandom"] }
 rand = "0.10.3"
+ring = "0.17"
 tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "net", "time", "sync", "signal", "io-util", "fs"] }
 x25519-dalek = { version = "3.0.0", features = ["static_secrets", "getrandom"] }
 

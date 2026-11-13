@@ -73,6 +73,7 @@ v2node-proto = { path = "crates/v2node-proto" }
 
 [dev-dependencies]
 criterion = "0.8.2"
+ring = "0.17"
 
 [[bench]]
 name = "proto_bench"
