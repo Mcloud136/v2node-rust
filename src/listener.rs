@@ -140,6 +140,9 @@ impl NodeListener {
                     accepted = listener.accept() => {
                         match accepted {
                             Ok((stream, peer)) => {
+                                // Match the outbound side: Nagle would delay the 2-byte
+                                // VLESS response and small TLS records by up to 40ms.
+                                stream.set_nodelay(true).ok();
                                 let current = accept_state.load_full();
                                 let config = current.config.clone();
                                 let context = current.context.clone();

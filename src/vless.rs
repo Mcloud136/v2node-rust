@@ -516,6 +516,9 @@ async fn udp_up<R>(
 where
     R: AsyncRead + Unpin,
 {
+    // length comes from read_u16, so one max-sized buffer serves every packet.
+    // Mirrors udp_down; allocating per packet cost ~150ns and added allocator jitter.
+    let mut payload = vec![0u8; u16::MAX as usize];
     loop {
         let length = tokio::select! {
             () = token.cancelled() => return Ok(()),
@@ -525,10 +528,9 @@ where
             continue;
         }
         debug!(length, "udp up packet");
-        let mut payload = vec![0u8; length];
         tokio::select! {
             () = token.cancelled() => return Ok(()),
-            result = reader.read_exact(&mut payload) => {
+            result = reader.read_exact(&mut payload[..length]) => {
                 result?;
             }
         }
@@ -541,7 +543,7 @@ where
         storage.up.fetch_add(length as u64, Ordering::Relaxed);
         tokio::select! {
             () = token.cancelled() => return Ok(()),
-            result = socket.send(&payload) => {
+            result = socket.send(&payload[..length]) => {
                 result?;
             }
         }
@@ -1316,5 +1318,50 @@ mod tests {
         let mut payload = [0u8; 4];
         client_reader.read_exact(&mut payload).await.unwrap();
         assert_eq!(&payload, b"ping");
+    }
+
+    #[tokio::test]
+    async fn udp_relay_handles_max_and_varying_packet_sizes() {
+        let uuid = Uuid::new_v4();
+        let echo = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let port = echo.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let mut buffer = vec![0u8; u16::MAX as usize];
+            loop {
+                let (read, peer) = echo.recv_from(&mut buffer).await.unwrap();
+                echo.send_to(&buffer[..read], peer).await.unwrap();
+            }
+        });
+
+        let (client, server) = tokio::io::duplex(1 << 20);
+        let context = context(uuid);
+        tokio::spawn(
+            async move { serve(server, None, "203.0.113.7".parse().unwrap(), context).await },
+        );
+        let (mut client_reader, mut client_writer) = tokio::io::split(client);
+        let request = ipv4_request(uuid, 2, port, std::net::Ipv4Addr::LOCALHOST, b"");
+        client_writer.write_all(&request).await.unwrap();
+        let mut response = [0u8; 2];
+        client_reader.read_exact(&mut response).await.unwrap();
+        assert_eq!(response, [0, 0]);
+
+        // 65507 is the real IPv4 UDP payload ceiling (65535 exceeds it and the
+        // OS rejects the send). The short packet afterwards would expose stale
+        // bytes if the reused buffer were sliced incorrectly.
+        for size in [65507usize, 1, 1400, 65507] {
+            let payload: Vec<u8> = (0..size).map(|i| (i % 251) as u8).collect();
+            client_writer
+                .write_all(&(size as u16).to_be_bytes())
+                .await
+                .unwrap();
+            client_writer.write_all(&payload).await.unwrap();
+
+            let mut length = [0u8; 2];
+            client_reader.read_exact(&mut length).await.unwrap();
+            assert_eq!(u16::from_be_bytes(length) as usize, size);
+            let mut received = vec![0u8; size];
+            client_reader.read_exact(&mut received).await.unwrap();
+            assert_eq!(received, payload, "size {size}");
+        }
     }
 }

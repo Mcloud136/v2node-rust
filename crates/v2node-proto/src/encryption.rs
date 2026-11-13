@@ -997,7 +997,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aes_gcm::{Aes256Gcm, Nonce as AesNonce, aead::{Aead, KeyInit, Payload}};
+    use aes_gcm::{
+        Aes256Gcm, Nonce as AesNonce,
+        aead::{Aead, KeyInit, Payload},
+    };
     use chacha20poly1305::{ChaCha20Poly1305, Nonce as ChaChaNonce};
 
     #[test]
