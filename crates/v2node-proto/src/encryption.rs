@@ -1,9 +1,7 @@
 use aes::cipher::{KeyIvInit, StreamCipher};
-use aes_gcm::aead::{Aead, KeyInit, Payload};
 use anyhow::{Context, Result, anyhow, bail};
 use base64::Engine;
 use bytes::{Buf, BufMut, BytesMut};
-use chacha20poly1305::{ChaCha20Poly1305, Nonce as ChaChaNonce};
 use ctr::Ctr128BE;
 use ml_kem::{
     Ciphertext, EncapsulationKey, KeyExport, MlKem768,
@@ -238,7 +236,7 @@ struct AeadState {
 
 enum AeadCipher {
     Aes(Box<ring::aead::LessSafeKey>),
-    ChaCha(ChaCha20Poly1305),
+    ChaCha(Box<ring::aead::LessSafeKey>),
 }
 
 impl AeadState {
@@ -250,10 +248,11 @@ impl AeadState {
                     .map_err(|_| anyhow!("AES-NI key init"))?;
                 AeadCipher::Aes(Box::new(ring::aead::LessSafeKey::new(unbound)))
             }
-            CipherKind::ChaCha => AeadCipher::ChaCha(
-                ChaCha20Poly1305::new_from_slice(&key)
-                    .map_err(|error| anyhow!("ChaCha init: {error}"))?,
-            ),
+            CipherKind::ChaCha => {
+                let unbound = ring::aead::UnboundKey::new(&ring::aead::CHACHA20_POLY1305, &key)
+                    .map_err(|_| anyhow!("ChaCha20 key init"))?;
+                AeadCipher::ChaCha(Box::new(ring::aead::LessSafeKey::new(unbound)))
+            }
         };
         Ok(Self {
             kind,
@@ -287,48 +286,28 @@ impl AeadState {
     }
 
     fn seal_with_nonce(&self, nonce: [u8; 12], plaintext: &[u8], aad: &[u8]) -> Result<Vec<u8>> {
-        match &self.cipher {
-            AeadCipher::Aes(key) => {
-                let mut buf = plaintext.to_vec();
-                let n = ring::aead::Nonce::assume_unique_for_key(nonce);
-                key.seal_in_place_append_tag(n, ring::aead::Aad::from(aad), &mut buf)
-                    .map_err(|_| anyhow!("AES-NI seal"))?;
-                Ok(buf)
-            }
-            AeadCipher::ChaCha(cipher) => cipher
-                .encrypt(
-                    &ChaChaNonce::from(nonce),
-                    Payload {
-                        msg: plaintext,
-                        aad,
-                    },
-                )
-                .map_err(|error| anyhow!("ChaCha seal: {error}")),
-        }
+        let key = match &self.cipher {
+            AeadCipher::Aes(k) | AeadCipher::ChaCha(k) => k,
+        };
+        let mut buf = plaintext.to_vec();
+        let n = ring::aead::Nonce::assume_unique_for_key(nonce);
+        key.seal_in_place_append_tag(n, ring::aead::Aad::from(aad), &mut buf)
+            .map_err(|_| anyhow!("AEAD seal"))?;
+        Ok(buf)
     }
 
     fn open_with_nonce(&self, nonce: [u8; 12], ciphertext: &[u8], aad: &[u8]) -> Result<Vec<u8>> {
-        match &self.cipher {
-            AeadCipher::Aes(key) => {
-                let mut buf = ciphertext.to_vec();
-                let n = ring::aead::Nonce::assume_unique_for_key(nonce);
-                let plain = key
-                    .open_in_place(n, ring::aead::Aad::from(aad), &mut buf)
-                    .map_err(|_| anyhow!("AES-NI open"))?;
-                let len = plain.len();
-                buf.truncate(len);
-                Ok(buf)
-            }
-            AeadCipher::ChaCha(cipher) => cipher
-                .decrypt(
-                    &ChaChaNonce::from(nonce),
-                    Payload {
-                        msg: ciphertext,
-                        aad,
-                    },
-                )
-                .map_err(|error| anyhow!("ChaCha open: {error}")),
-        }
+        let key = match &self.cipher {
+            AeadCipher::Aes(k) | AeadCipher::ChaCha(k) => k,
+        };
+        let mut buf = ciphertext.to_vec();
+        let n = ring::aead::Nonce::assume_unique_for_key(nonce);
+        let plain = key
+            .open_in_place(n, ring::aead::Aad::from(aad), &mut buf)
+            .map_err(|_| anyhow!("AEAD open"))?;
+        let len = plain.len();
+        buf.truncate(len);
+        Ok(buf)
     }
 }
 
@@ -1018,7 +997,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aes_gcm::{Aes256Gcm, Nonce as AesNonce};
+    use aes_gcm::{Aes256Gcm, Nonce as AesNonce, aead::{Aead, KeyInit, Payload}};
+    use chacha20poly1305::{ChaCha20Poly1305, Nonce as ChaChaNonce};
 
     #[test]
     fn raw_blake3_derive_matches_crate() {
