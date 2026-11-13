@@ -69,7 +69,7 @@ impl NodeRuntime {
         let alive = client.get_alive_list().await;
 
         let state = Arc::new(NodeState::new());
-        let _ = apply_users(&state, &users);
+        let startup_traffic = apply_users(&state, &users);
         if let Some(alive) = alive {
             state.limiter.update_alive(alive);
         }
@@ -111,6 +111,9 @@ impl NodeRuntime {
             &runtime.traffic_spool_path,
         );
         reporter.load_spool();
+        // Fresh store means the diff is normally empty; keep the settlement
+        // path explicit so a future pre-seeded store cannot silently drop it.
+        reporter.add_all(&startup_traffic);
         let traffic = Arc::new(Mutex::new(reporter));
         let tasks = spawn_background_tasks(
             client,
@@ -166,18 +169,26 @@ impl NodeRuntime {
         let encryption = match build_encryption(&info) {
             Ok(value) => value,
             Err(error) => {
-                let _ = self.tls.apply_node(&info, &self.runtime);
+                if let Err(restore_error) = self.tls.apply_node(&info, &self.runtime) {
+                    warn!(node_id = self.node_id, error = %restore_error, "restore previous TLS config failed");
+                }
                 return Err(error);
             }
         };
-        let listener_config =
-            match ListenerConfig::from_node(&info, &runtime, &self.tls, connection_limit.clone()) {
-                Ok(value) => Arc::new(value),
-                Err(error) => {
-                    let _ = self.tls.apply_node(&info, &self.runtime);
-                    return Err(error);
+        let listener_config = match ListenerConfig::from_node(
+            &info,
+            &runtime,
+            &self.tls,
+            connection_limit.clone(),
+        ) {
+            Ok(value) => Arc::new(value),
+            Err(error) => {
+                if let Err(restore_error) = self.tls.apply_node(&info, &self.runtime) {
+                    warn!(node_id = self.node_id, error = %restore_error, "restore previous TLS config failed");
                 }
-            };
+                return Err(error);
+            }
+        };
         let context = Arc::new(VlessContext {
             state: self.state.clone(),
             runtime: runtime.clone(),
@@ -194,7 +205,9 @@ impl NodeRuntime {
 
         if let Err(error) = self.apply_listener(listener_config, context).await {
             let current = self.node_info.load_full();
-            let _ = self.tls.apply_node(&current, &self.runtime);
+            if let Err(restore_error) = self.tls.apply_node(&current, &self.runtime) {
+                warn!(node_id = self.node_id, error = %restore_error, "restore previous TLS config failed");
+            }
             let old_runtime = self.runtime.clone();
             let old_acme = self.acme.clone();
             let old_limit = self.connection_limit.clone();

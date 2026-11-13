@@ -173,6 +173,24 @@ fn hash_with_key(key: &[u32; 8], flags: u32, input: &[u8]) -> Result<[u8; 32]> {
     Ok(bytes)
 }
 
+/// BLAKE3 derive-key，与 Xray 的 `blake3.DeriveKey(context, key)` 字节一致。
+///
+/// 内部为纯 Rust 实现（无 SIMD 依赖），支持任意长度二进制 context。
+///
+/// # Errors
+///
+/// 输入长度超出内部哈希支持的界限时返回错误。
+///
+/// # Examples
+///
+/// ```
+/// use v2node_proto::encryption::derive_key_raw;
+///
+/// let key = derive_key_raw(b"VLESS", &[7u8; 32]).unwrap();
+/// assert_eq!(key.len(), 32);
+/// // 相同输入必须得到相同输出（确定性派生）。
+/// assert_eq!(key, derive_key_raw(b"VLESS", &[7u8; 32]).unwrap());
+/// ```
 pub fn derive_key_raw(context: &[u8], key_material: &[u8]) -> Result<[u8; 32]> {
     let context_key = hash_with_key(&BLAKE3_IV, DERIVE_KEY_CONTEXT, context)?;
     let mut key_words = [0u32; 8];
@@ -363,6 +381,10 @@ impl PaddingConfig {
     }
 }
 
+/// VLESS Encryption 服务端（入站解密）。
+///
+/// 由面板下发的 `decryption` 配置串构造，支持 `mlkem768x25519plus` 的
+/// `native` / `xorpub` / `random` 三种模式，1-RTT。
 #[allow(dead_code)]
 pub struct EncryptionServer {
     private: StaticSecret,
@@ -373,6 +395,24 @@ pub struct EncryptionServer {
 
 #[allow(dead_code)]
 impl EncryptionServer {
+    /// 解析服务端 `decryption` 配置串。
+    ///
+    /// 格式：`mlkem768x25519plus.<mode>.<ticket>[.<padding>].<private_key>`，
+    /// 私钥为 32 字节 X25519 的 base64url 编码。空串或 `"none"` 返回
+    /// `Ok(None)` 表示不启用加密。
+    ///
+    /// # Errors
+    ///
+    /// 套件名/模式不支持、ticket 非法、私钥编码或长度错误时返回错误。
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use v2node_proto::encryption::EncryptionServer;
+    ///
+    /// assert!(EncryptionServer::from_decryption("none").unwrap().is_none());
+    /// assert!(EncryptionServer::from_decryption("mlkem768x25519plus.native.600s.AAAA").is_err());
+    /// ```
     pub fn from_decryption(decryption: &str) -> Result<Option<Arc<Self>>> {
         let decryption = decryption.trim();
         if decryption.is_empty() || decryption == "none" {
@@ -423,6 +463,16 @@ impl EncryptionServer {
         })))
     }
 
+    /// 在已建立的传输流上执行服务端加密握手（1-RTT）。
+    ///
+    /// 成功后返回应用层明文流与后台 pump 任务句柄；调用方负责在连接
+    /// 结束时排水或 abort 该任务。握手本身不做超时控制，由调用方包裹
+    /// `tokio::time::timeout`。
+    ///
+    /// # Errors
+    ///
+    /// 对端数据不足、密钥不匹配、AEAD 校验失败、长度字段非法或
+    /// 0-RTT（M1 不支持）时返回错误。
     pub async fn handshake<S>(&self, mut stream: S) -> Result<(DuplexStream, JoinHandle<()>)>
     where
         S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
@@ -571,6 +621,11 @@ impl EncryptionServer {
     }
 }
 
+/// VLESS Encryption 客户端（出站加密）配置。
+///
+/// 由订阅下发的 `encryption` 配置串构造；与服务端 `decryption` 的
+/// 区别是第三段为 `rtt`（`0rtt` / `1rtt`）而非 ticket，末段为服务端
+/// 公钥（base64url）而非私钥。
 #[allow(dead_code)]
 pub struct ClientEncryptionConfig {
     pub server_public: [u8; 32],
@@ -581,6 +636,22 @@ pub struct ClientEncryptionConfig {
 
 #[allow(dead_code)]
 impl ClientEncryptionConfig {
+    /// 解析客户端 `encryption` 配置串。
+    ///
+    /// 格式：`mlkem768x25519plus.<mode>.<rtt>[.<padding>].<password>`，
+    /// `password` 为服务端 X25519 公钥的 base64url 编码。
+    ///
+    /// # Errors
+    ///
+    /// 套件名/模式不支持、公钥编码或长度错误、padding 非法时返回错误。
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use v2node_proto::encryption::ClientEncryptionConfig;
+    ///
+    /// assert!(ClientEncryptionConfig::parse("mlkem768x25519plus.native.1rtt.AAAA").is_err());
+    /// ```
     pub fn parse(encryption: &str) -> Result<Self> {
         let parts: Vec<&str> = encryption.split('.').collect();
         if parts.len() < 4 || parts[0] != "mlkem768x25519plus" {
@@ -625,6 +696,16 @@ fn xor_relay(data: &mut [u8], public: &[u8; 32], iv: &[u8; 16]) -> Result<()> {
 }
 
 #[allow(dead_code)]
+/// 在已建立的传输流上执行客户端加密握手（1-RTT）。
+///
+/// 成功后返回应用层明文流与后台 pump 任务句柄；调用方负责在连接
+/// 结束时排水或 abort 该任务。握手本身不做超时控制，由调用方包裹
+/// `tokio::time::timeout`。
+///
+/// # Errors
+///
+/// 服务端响应不足、密钥不匹配、AEAD 校验失败或 ticket/padding
+/// 长度非法时返回错误。
 pub async fn client_handshake<S>(
     mut stream: S,
     config: &ClientEncryptionConfig,
@@ -808,7 +889,9 @@ where
                         }
                         header_plain = Some(header);
                     }
-                    let header = header_plain.unwrap();
+                    let Some(header) = header_plain else {
+                        break;
+                    };
                     let length = u16::from_be_bytes([header[3], header[4]]) as usize;
                     if header[0] != 23
                         || header[1] != 3

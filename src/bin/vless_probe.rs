@@ -1,6 +1,6 @@
 use v2node_proto::encryption;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use base64::Engine;
 use clap::Parser;
 use futures::{SinkExt, StreamExt};
@@ -129,7 +129,9 @@ async fn main() -> Result<()> {
     let (mut app_reader, app_writer) = tokio::io::split(app);
     let mut app_writer = Some(app_writer);
     let writer_task = if args.encryption.is_some() || !args.early {
-        let mut writer = app_writer.take().unwrap();
+        let mut writer = app_writer
+            .take()
+            .ok_or_else(|| anyhow!("app writer already consumed"))?;
         let bytes = request_bytes;
         Some(tokio::spawn(async move {
             writer.write_all(&bytes).await?;
@@ -150,7 +152,9 @@ async fn main() -> Result<()> {
     }
     let mut app_writer = match writer_task {
         Some(task) => task.await??,
-        None => app_writer.take().unwrap(),
+        None => app_writer
+            .take()
+            .ok_or_else(|| anyhow!("app writer already consumed"))?,
     };
     let mut rtts_us = Vec::new();
     for _ in 1..args.roundtrips {
