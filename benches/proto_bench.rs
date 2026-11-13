@@ -210,6 +210,80 @@ fn bench_l1(c: &mut Criterion) {
             black_box(plain.len())
         })
     });
+    // ChaCha20-Poly1305 旧版（RustCrypto 纯软件）
+    let chacha_cipher =
+        chacha20poly1305::ChaCha20Poly1305::new_from_slice(&f.key).expect("ChaCha key");
+    let chacha_nonce = chacha20poly1305::Nonce::from(f.nonce_bytes);
+    let chacha_ct = chacha_cipher
+        .encrypt(
+            &chacha_nonce,
+            aes_gcm::aead::Payload {
+                msg: &f.plaintext,
+                aad: &[],
+            },
+        )
+        .expect("ChaCha seal baseline");
+    c.bench_function("W4-ChaCha seal 8192B (RustCrypto)", |b| {
+        b.iter(|| {
+            black_box(
+                chacha_cipher
+                    .encrypt(
+                        &chacha_nonce,
+                        aes_gcm::aead::Payload {
+                            msg: &f.plaintext,
+                            aad: &[],
+                        },
+                    )
+                    .expect("ChaCha seal"),
+            )
+        })
+    });
+    c.bench_function("W5-ChaCha open 8192B (RustCrypto)", |b| {
+        b.iter(|| {
+            black_box(
+                chacha_cipher
+                    .decrypt(
+                        &chacha_nonce,
+                        aes_gcm::aead::Payload {
+                            msg: &chacha_ct,
+                            aad: &[],
+                        },
+                    )
+                    .expect("ChaCha open"),
+            )
+        })
+    });
+    // ChaCha20-Poly1305 新版（ring SIMD）
+    let chacha_ni_key = ring::aead::LessSafeKey::new(
+        ring::aead::UnboundKey::new(&ring::aead::CHACHA20_POLY1305, &f.key)
+            .expect("ChaCha ring key"),
+    );
+    c.bench_function("W4-ChaCha-NI seal 8192B (ring)", |b| {
+        b.iter(|| {
+            let mut buf = f.plaintext.clone();
+            chacha_ni_key
+                .seal_in_place_append_tag(
+                    ring::aead::Nonce::assume_unique_for_key(f.nonce_bytes),
+                    ring::aead::Aad::empty(),
+                    &mut buf,
+                )
+                .expect("ChaCha ring seal");
+            black_box(buf)
+        })
+    });
+    c.bench_function("W5-ChaCha-NI open 8192B (ring)", |b| {
+        b.iter(|| {
+            let mut buf = chacha_ct.clone();
+            let plain = chacha_ni_key
+                .open_in_place(
+                    ring::aead::Nonce::assume_unique_for_key(f.nonce_bytes),
+                    ring::aead::Aad::empty(),
+                    &mut buf,
+                )
+                .expect("ChaCha ring open");
+            black_box(plain.len())
+        })
+    });
     c.bench_function("W6 pump-style alloc+copy 8192B", |b| {
         b.iter(|| {
             let mut out = Vec::with_capacity(RECORD);
