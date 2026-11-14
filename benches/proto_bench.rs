@@ -210,6 +210,39 @@ fn bench_l1(c: &mut Criterion) {
             black_box(plain.len())
         })
     });
+    // N-4 收益上限对照：同样的 ring 调用，但缓冲在迭代外复用、每次零分配。
+    // 与 W4-NI/W5-NI 的差值即 per-record to_vec 的可省成本。
+    let mut seal_scratch = f.plaintext.clone();
+    let seal_plain_len = f.plaintext.len();
+    c.bench_function("W4-NI-ZA seal 8192B (ring, reused buffer)", |b| {
+        b.iter(|| {
+            seal_scratch.truncate(seal_plain_len);
+            ni_key
+                .seal_in_place_append_tag(
+                    ring::aead::Nonce::assume_unique_for_key(f.nonce_bytes),
+                    ring::aead::Aad::empty(),
+                    &mut seal_scratch,
+                )
+                .expect("NI seal ZA");
+            black_box(seal_scratch.len())
+        })
+    });
+    let mut open_scratch = f.ciphertext.clone();
+    let open_cipher_len = f.ciphertext.len();
+    c.bench_function("W5-NI-ZA open 8192B (ring, reused buffer)", |b| {
+        b.iter(|| {
+            open_scratch.truncate(open_cipher_len);
+            open_scratch.copy_from_slice(&f.ciphertext);
+            let plain = ni_key
+                .open_in_place(
+                    ring::aead::Nonce::assume_unique_for_key(f.nonce_bytes),
+                    ring::aead::Aad::empty(),
+                    &mut open_scratch,
+                )
+                .expect("NI open ZA");
+            black_box(plain.len())
+        })
+    });
     // ChaCha20-Poly1305 旧版（RustCrypto 纯软件）
     let chacha_cipher =
         chacha20poly1305::ChaCha20Poly1305::new_from_slice(&f.key).expect("ChaCha key");
