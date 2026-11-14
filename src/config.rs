@@ -109,6 +109,7 @@ pub struct RuntimeConfig {
     pub tls_min_version: String,
     pub tls_max_version: String,
     pub tls_alpn: Vec<String>,
+    pub tls_session_resumption: bool,
     pub cert_reload_interval_secs: u64,
 }
 
@@ -142,6 +143,7 @@ impl Default for RuntimeConfig {
             tls_min_version: "1.2".to_owned(),
             tls_max_version: "1.3".to_owned(),
             tls_alpn: vec!["http/1.1".to_owned()],
+            tls_session_resumption: false,
             cert_reload_interval_secs: 60,
         }
     }

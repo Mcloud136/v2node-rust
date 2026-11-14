@@ -257,6 +257,12 @@ impl TlsManager {
             .iter()
             .map(|value| value.as_bytes().to_vec())
             .collect();
+        if runtime.tls_session_resumption {
+            // Per-node keys: clients cache tickets by SNI, and each node has its
+            // own server_name, so a shared key would add no hit rate.
+            config.ticketer = rustls::crypto::aws_lc_rs::Ticketer::new()
+                .map_err(|error| anyhow!("build TLS session ticketer: {error}"))?;
+        }
         Ok(Arc::new(config))
     }
 
@@ -455,6 +461,78 @@ mod tests {
             second.signing_key.serialize_pem().as_bytes(),
         );
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn session_resumption_is_disabled_by_default() {
+        let runtime = runtime();
+        assert!(!runtime.tls_session_resumption);
+        let manager = TlsManager::new();
+        let config = manager.build_server_config(&runtime).unwrap();
+        assert!(
+            !config.ticketer.enabled(),
+            "default config must not issue session tickets"
+        );
+    }
+
+    #[test]
+    fn session_resumption_issues_usable_tickets_when_enabled() {
+        let mut runtime = runtime();
+        runtime.tls_session_resumption = true;
+        let manager = TlsManager::new();
+        let config = manager.build_server_config(&runtime).unwrap();
+        assert!(config.ticketer.enabled());
+        assert!(config.ticketer.lifetime() > 0);
+
+        let plain = b"session-value-stand-in";
+        let ticket = config.ticketer.encrypt(plain).expect("ticket issued");
+        assert_ne!(ticket, plain, "ticket must not be plaintext");
+        assert_eq!(
+            config.ticketer.decrypt(&ticket).expect("ticket decrypts"),
+            plain
+        );
+        // A foreign key must not decrypt this node's ticket.
+        let other = manager.build_server_config(&runtime).unwrap();
+        assert!(other.ticketer.decrypt(&ticket).is_none());
+        // Tampered ciphertext must be rejected, not panic.
+        let mut tampered = ticket.clone();
+        let last = tampered.len() - 1;
+        tampered[last] ^= 0xFF;
+        assert!(config.ticketer.decrypt(&tampered).is_none());
+        assert!(config.ticketer.decrypt(&[]).is_none());
+    }
+
+    #[test]
+    fn session_resumption_does_not_affect_certificate_loading() {
+        let dir = temp_dir("resumption");
+        let cert_path = dir.join("node.crt");
+        let key_path = dir.join("node.key");
+        let generated =
+            rcgen::generate_simple_self_signed(vec!["resume.local".to_owned()]).unwrap();
+        fs::write(&cert_path, generated.cert.pem()).unwrap();
+        fs::write(&key_path, generated.signing_key.serialize_pem()).unwrap();
+
+        let mut runtime = runtime();
+        runtime.tls_session_resumption = true;
+        let manager = TlsManager::new();
+        let node = crate::panel::NodeInfo {
+            tls: 1,
+            tls_settings: Some(crate::panel::TlsSettings {
+                cert_mode: "file".to_owned(),
+                cert_file: cert_path.display().to_string(),
+                key_file: key_path.display().to_string(),
+                server_name: "resume.local".to_owned(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        manager.apply_node(&node, &runtime).unwrap();
+        let acceptor = manager.acceptor();
+        assert!(
+            acceptor.is_some(),
+            "TLS must still terminate with resumption on"
+        );
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[cfg(unix)]

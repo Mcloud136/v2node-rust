@@ -126,6 +126,7 @@ v2node-rust uninstall
 | `Runtime.PushIdempotency` | false | 流量推送批次幂等；需面板支持 `X-V2Node-Batch-Id` 去重 |
 | `Runtime.TrafficSpoolPath` | 空 | 流量上报 spool 路径；设置后未送达批次会落盘并在重启后重放，建议 `/var/lib/v2node-rust/traffic.spool` |
 | `Runtime.RelayBufferSize` | 32768 | 数据面 relay 与 WS 桥接缓冲。注意：VLESS Encryption 记录层 pump 使用独立的 16384 字节缓冲，不受此字段影响 |
+| `Runtime.TlsSessionResumption` | false | TLS 会话恢复（签发票据，重连免完整握手）。仅在节点自己终止 TLS 时有效；`cert_mode=none`（由 Cloudflare 终止 TLS）时无作用。密钥每节点独立、12 小时自动轮换 |
 | `Acme.DirectoryUrl` | LE staging | 生产必须显式改为 `https://acme-v02.api.letsencrypt.org/directory` |
 | `Acme.Http01Bind` | `0.0.0.0:80` | HTTP-01 挑战端口，需公网可达 |
 | `Acme.DnsEnv` | 空 | Cloudflare 凭据，形如 `{"CLOUDFLARE_DNS_API_TOKEN":"..."}`；面板下发的 `tls_settings.dns_env` 使用 `KEY=VALUE,KEY=VALUE`，会覆盖同名全局值 |

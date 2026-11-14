@@ -43,6 +43,7 @@
     "TlsMinVersion": "1.2",
     "TlsMaxVersion": "1.3",
     "TlsAlpn": ["http/1.1"],
+    "TlsSessionResumption": false,
     "CertReloadIntervalSecs": 60
   },
   "Acme": {
